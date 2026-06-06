@@ -31,6 +31,14 @@ npm run dev
 npx remotion render
 ```
 
+**Render the image-based video**
+
+```console
+npx remotion render ImageVideo out/image-video.mp4
+```
+
+To change the images, add files to `public/` and edit `src/scenes/images/ImageVideoConfig.ts`.
+
 **Upgrade Remotion**
 
 ```console
