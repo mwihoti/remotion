@@ -1,68 +1,55 @@
-# Remotion video
+# Image Video Studio
 
-<p align="center">
-  <a href="https://github.com/remotion-dev/logo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/remotion-dev/logo/raw/main/animated-logo-banner-dark.apng">
-      <img alt="Animated Remotion Logo" src="https://github.com/remotion-dev/logo/raw/main/animated-logo-banner-light.gif">
-    </picture>
-  </a>
-</p>
+Creator dashboard for generating short-form videos from prompts and images.
 
-Welcome to your Remotion project!
+The app uses Next.js for the creator UI, AI models for script and scene planning, and Remotion for video preview/rendering.
 
 ## Commands
 
-**Install Dependencies**
-
 ```console
 npm i
-```
-
-**Start Preview**
-
-```console
 npm run dev
-```
-
-**Start Remotion Studio**
-
-```console
 npm run studio
+npm run lint
+npm run build
 ```
 
-**Render video**
+Render the default image video locally:
 
 ```console
-npx remotion render
+npm run render:image
 ```
 
-**Render the image-based video**
+## AI Model Setup
+
+Local Kimi K2.5 through Ollama:
 
 ```console
-npx remotion render ImageVideo out/image-video.mp4
+ollama pull kimi-k2.5
 ```
 
-To change the default images, add files to `public/` and edit `src/scenes/images/ImageVideoConfig.ts`.
-
-**Upgrade Remotion**
-
-```console
-npx remotion upgrade
+```env
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=kimi-k2.5
 ```
 
-## Docs
+Hosted model through OpenRouter:
 
-Get started with Remotion by reading the [fundamentals page](https://www.remotion.dev/docs/the-fundamentals).
+```env
+OPENROUTER_API_KEY=...
+OPENROUTER_MODEL=moonshotai/kimi-k2.5
+```
 
-## Help
+If no model is configured, the app still generates a basic local script fallback.
 
-We provide help on our [Discord server](https://discord.gg/6VzzNDwUwV).
+## Creator Flow
 
-## Issues
+1. Choose a format: portrait, landscape, square, or wide.
+2. Enter a video prompt.
+3. Add optional images.
+4. Generate a script.
+5. Edit scenes, captions, and voiceover.
+6. Preview with the Remotion Player.
 
-Found an issue with Remotion? [File an issue here](https://github.com/remotion-dev/remotion/issues/new).
-
-## License
-
-Note that for some entities a company license is needed. [Read the terms here](https://github.com/remotion-dev/remotion/blob/main/LICENSE.md).
+MP4 export works locally through Remotion. Hosted Vercel export needs a persistent renderer such as Remotion Lambda or a separate worker service.

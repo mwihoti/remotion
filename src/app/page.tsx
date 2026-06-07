@@ -203,7 +203,13 @@ export default function CreatorDashboard() {
           images: plan.slides.map((slide) => slide.image).filter(Boolean),
         }),
       });
-      const data = (await response.json()) as { plan?: VideoPlan; usedAi?: boolean; error?: string };
+      const data = (await response.json()) as {
+        plan?: VideoPlan;
+        provider?: "ollama" | "openrouter" | "local";
+        usedAi?: boolean;
+        error?: string;
+        warning?: string;
+      };
 
       if (!response.ok || !data.plan) {
         throw new Error(data.error ?? "Generation failed");
@@ -211,7 +217,13 @@ export default function CreatorDashboard() {
 
       setPlan(normalizeVideoPlan(data.plan));
       setActiveSceneIndex(0);
-      setStatus(data.usedAi ? "Generated with OpenRouter" : "Generated locally");
+      if (data.provider === "ollama") {
+        setStatus("Generated with Kimi K2.5 via Ollama");
+      } else if (data.provider === "openrouter") {
+        setStatus("Generated with OpenRouter");
+      } else {
+        setStatus(data.warning ?? "Generated locally");
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Generation failed");
     } finally {

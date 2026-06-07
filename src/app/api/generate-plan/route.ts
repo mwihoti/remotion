@@ -11,6 +11,8 @@ interface GeneratePlanRequest {
   plan?: Partial<VideoPlan>;
 }
 
+type AiProvider = "ollama" | "openrouter" | "local";
+
 const schema = {
   type: "object",
   additionalProperties: false,
@@ -51,6 +53,9 @@ const schema = {
     },
   },
 };
+
+const systemPrompt =
+  "You are a concise short-form video strategist. Return only JSON matching the schema. Use the provided image filenames exactly. Create punchy captions, a strong hook, a clear CTA, practical voiceover lines, and keep the selected format unchanged.";
 
 const inferCaption = (image: string) =>
   image.startsWith("data:")
@@ -159,6 +164,8 @@ const readImageAsDataUrl = async (image: string) => {
   return `data:${mimeForImage(image)};base64,${data.toString("base64")}`;
 };
 
+const dataUrlToBase64 = (dataUrl: string) => dataUrl.replace(/^data:[^;]+;base64,/, "");
+
 const parseModelJson = (content: string) => {
   try {
     return JSON.parse(content) as Partial<VideoPlan>;
@@ -172,18 +179,89 @@ const parseModelJson = (content: string) => {
   }
 };
 
-export async function POST(request: Request) {
-  const body = (await request.json()) as GeneratePlanRequest;
-  const apiKey = process.env.OPENROUTER_API_KEY;
+const createUserPrompt = ({
+  body,
+  current,
+  images,
+}: {
+  body: GeneratePlanRequest;
+  current: VideoPlan;
+  images: string[];
+}) =>
+  JSON.stringify({
+    productDescription: body.description,
+    currentPlan: current,
+    imageFilenames: images,
+    instructions: [
+      "If no images are provided, create text-only scenes with image set to an empty string.",
+      "If images are provided, use the provided image values exactly.",
+      "Preserve currentPlan.format exactly.",
+      "Return valid JSON only.",
+    ],
+  });
 
-  if (!apiKey) {
-    return NextResponse.json({ plan: fallbackPlan(body), usedAi: false });
+const generateWithOllama = async ({
+  body,
+  current,
+  images,
+}: {
+  body: GeneratePlanRequest;
+  current: VideoPlan;
+  images: string[];
+}) => {
+  const baseUrl = (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+  const model = process.env.OLLAMA_MODEL ?? "kimi-k2.5";
+  const imageDataUrls = await Promise.all(images.slice(0, 10).map(readImageAsDataUrl));
+
+  const response = await fetch(`${baseUrl}/api/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: schema,
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: createUserPrompt({ body, current, images }),
+          images: imageDataUrls.map(dataUrlToBase64),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Ollama request failed: ${detail}`);
   }
 
-  const current = normalizeVideoPlan(body.plan ?? defaultVideoPlan);
-  const images = body.images?.length
-    ? body.images
-    : current.slides.map((slide) => slide.image).filter(Boolean);
+  const data = (await response.json()) as { message?: { content?: string } };
+  const content = data.message?.content;
+
+  if (!content) {
+    throw new Error("Ollama returned no content");
+  }
+
+  return parseModelJson(content);
+};
+
+const generateWithOpenRouter = async ({
+  body,
+  current,
+  images,
+  apiKey,
+}: {
+  body: GeneratePlanRequest;
+  current: VideoPlan;
+  images: string[];
+  apiKey: string;
+}) => {
   const imageParts = await Promise.all(
     images.slice(0, 10).map(async (image) => ({
       type: "image_url",
@@ -202,7 +280,7 @@ export async function POST(request: Request) {
       "X-Title": "Image Video Studio",
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL ?? "google/gemini-2.5-flash",
+      model: process.env.OPENROUTER_MODEL ?? "moonshotai/kimi-k2.5",
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -214,19 +292,14 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "system",
-          content:
-            "You are a concise short-form video strategist. Return only JSON matching the schema. Use the provided image filenames exactly. Create punchy captions, a strong hook, a clear CTA, and practical voiceover lines.",
+          content: systemPrompt,
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: JSON.stringify({
-                productDescription: body.description,
-                currentPlan: current,
-                imageFilenames: images,
-              }),
+              text: createUserPrompt({ body, current, images }),
             },
             ...imageParts,
           ],
@@ -237,23 +310,61 @@ export async function POST(request: Request) {
 
   if (!response.ok) {
     const detail = await response.text();
-    return NextResponse.json({ error: "OpenRouter request failed", detail }, { status: 502 });
+    throw new Error(`OpenRouter request failed: ${detail}`);
   }
 
   const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
   const content = data.choices?.[0]?.message?.content;
 
   if (!content) {
-    return NextResponse.json({ error: "OpenRouter returned no content" }, { status: 502 });
+    throw new Error("OpenRouter returned no content");
   }
 
-  const generatedPlan = parseModelJson(content);
+  return parseModelJson(content);
+};
+
+export async function POST(request: Request) {
+  const body = (await request.json()) as GeneratePlanRequest;
+  const current = normalizeVideoPlan(body.plan ?? defaultVideoPlan);
+  const images = body.images?.length
+    ? body.images
+    : current.slides.map((slide) => slide.image).filter(Boolean);
+
+  let generatedPlan: Partial<VideoPlan>;
+  let provider: AiProvider = "local";
+
+  try {
+    if (process.env.AI_PROVIDER === "ollama" || process.env.OLLAMA_MODEL || process.env.OLLAMA_BASE_URL) {
+      generatedPlan = await generateWithOllama({ body, current, images });
+      provider = "ollama";
+    } else if (process.env.OPENROUTER_API_KEY) {
+      generatedPlan = await generateWithOpenRouter({
+        body,
+        current,
+        images,
+        apiKey: process.env.OPENROUTER_API_KEY,
+      });
+      provider = "openrouter";
+    } else {
+      generatedPlan = fallbackPlan(body);
+      provider = "local";
+    }
+  } catch (error) {
+    return NextResponse.json({
+      warning: "Model generation failed; used local fallback",
+      detail: error instanceof Error ? error.message : "Unknown model error",
+      plan: fallbackPlan(body),
+      provider: "local" satisfies AiProvider,
+      usedAi: false,
+    });
+  }
 
   return NextResponse.json({
     plan: normalizeVideoPlan({
       ...generatedPlan,
       format: generatedPlan.format ?? current.format,
     }),
-    usedAi: true,
+    provider,
+    usedAi: provider !== "local",
   });
 }
