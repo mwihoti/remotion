@@ -1,24 +1,68 @@
 "use client";
 
+/* eslint-disable @remotion/warn-native-media-tag */
+
 import { ChangeEvent, useMemo, useState } from "react";
-import Image from "next/image";
-import { defaultVideoPlan, normalizeVideoPlan, VideoPlan, VideoPlanSlide } from "../lib/video-plan";
+import { Player } from "@remotion/player";
+import {
+  defaultVideoPlan,
+  getVideoFormat,
+  getVideoPlanDuration,
+  normalizeVideoPlan,
+  videoFormats,
+  VideoPlan,
+  VideoPlanSlide,
+} from "../lib/video-plan";
+import { ImageVideoComposition } from "../scenes/images/ImageVideoComposition";
 
-const starterImages = Array.from(new Set(defaultVideoPlan.slides.map((slide) => slide.image)));
+const sampleImages = [
+  "app_home.png",
+  "app_checkin.png",
+  "app_progress.png",
+  "app_achievements.png",
+  "app_community.png",
+  "app_badge.png",
+];
 
-const imageSrc = (image: string) => `/${image.split("/").map(encodeURIComponent).join("/")}`;
+const imageSrc = (image: string) =>
+  image.startsWith("data:") || image.startsWith("http://") || image.startsWith("https://")
+    ? image
+    : `/${image.split("/").map(encodeURIComponent).join("/")}`;
+
+const imageLabel = (image: string, index?: number) =>
+  image.startsWith("data:")
+    ? `Uploaded image${typeof index === "number" ? ` ${index + 1}` : ""}`
+    : image;
+
+const captionFromFileName = (name: string) =>
+  name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const ctaHref = (url: string) => {
+  if (!url.trim()) return "#";
+  return /^https?:\/\//.test(url) ? url : `https://${url}`;
+};
 
 export default function CreatorDashboard() {
   const [plan, setPlan] = useState<VideoPlan>(defaultVideoPlan);
-  const [description, setDescription] = useState(
-    "A Web3 fitness and habit app where users check in daily, earn tokens, unlock achievement NFTs, and stay accountable with a community.",
-  );
-  const [availableImages, setAvailableImages] = useState(starterImages);
+  const [description, setDescription] = useState("");
+  const [availableImages, setAvailableImages] = useState(sampleImages);
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null);
   const [status, setStatus] = useState("Ready");
   const [renderUrl, setRenderUrl] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const activeSlide = plan.slides[0];
+  const [activeSceneIndex, setActiveSceneIndex] = useState(0);
+  const activeSlide = plan.slides[activeSceneIndex] ?? plan.slides[0];
 
   const totalSeconds = useMemo(
     () => Math.round(plan.slides.reduce((total, slide) => total + slide.duration, 120) / 30),
@@ -39,6 +83,12 @@ export default function CreatorDashboard() {
     }));
   };
 
+  const updateFormat = (formatId: string) => {
+    const format = getVideoFormat(formatId);
+    updatePlan({ format });
+    setStatus(`Format set to ${format.label}`);
+  };
+
   const updateSlide = (index: number, patch: Partial<VideoPlanSlide>) => {
     setPlan((current) => ({
       ...current,
@@ -50,25 +100,33 @@ export default function CreatorDashboard() {
 
   const addSlide = () => {
     const image = availableImages[0] ?? "app_home.png";
-    setPlan((current) => ({
-      ...current,
-      slides: [
-        ...current.slides,
-        {
-          image,
-          caption: "New scene",
-          voiceover: "",
-          duration: 90,
-        },
-      ],
-    }));
+    setPlan((current) => {
+      setActiveSceneIndex(current.slides.length);
+      return {
+        ...current,
+        slides: [
+          ...current.slides,
+          {
+            image,
+            caption: "New scene",
+            voiceover: "Describe what this scene should say.",
+            duration: 90,
+          },
+        ],
+      };
+    });
+    setStatus("Added a new editable scene");
   };
 
   const removeSlide = (index: number) => {
-    setPlan((current) => ({
-      ...current,
-      slides: current.slides.filter((_, slideIndex) => slideIndex !== index),
-    }));
+    setPlan((current) => {
+      const slides = current.slides.filter((_, slideIndex) => slideIndex !== index);
+      setActiveSceneIndex((active) => Math.min(active, slides.length - 1));
+      return {
+        ...current,
+        slides,
+      };
+    });
   };
 
   const moveSlide = (index: number, direction: -1 | 1) => {
@@ -81,6 +139,7 @@ export default function CreatorDashboard() {
       const slides = [...current.slides];
       const [slide] = slides.splice(index, 1);
       slides.splice(nextIndex, 0, slide);
+      setActiveSceneIndex(nextIndex);
       return { ...current, slides };
     });
   };
@@ -92,41 +151,38 @@ export default function CreatorDashboard() {
     }
 
     setIsBusy(true);
-    setStatus("Uploading images");
-    const formData = new FormData();
-    Array.from(selectedFiles).forEach((file) => formData.append("images", file));
+    setStatus("Adding images to this project");
 
     try {
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
+      const files = Array.from(selectedFiles);
+      const uploadedImages = await Promise.all(
+        files.map(async (file) => ({
+          image: await readFileAsDataUrl(file),
+          caption: captionFromFileName(file.name),
+        })),
+      );
+
+      setAvailableImages((current) =>
+        Array.from(new Set([...current, ...uploadedImages.map((upload) => upload.image)])),
+      );
+      setPlan((current) => {
+        setActiveSceneIndex(current.slides.length);
+        return {
+          ...current,
+          slides: [
+            ...current.slides,
+            ...uploadedImages.map(({ image, caption }) => ({
+              image,
+              caption,
+              voiceover: `${caption} introduces a key visual in the video.`,
+              duration: 90,
+            })),
+          ],
+        };
       });
-      const data = (await response.json()) as { images?: string[]; error?: string };
-
-      if (!response.ok || !data.images) {
-        throw new Error(data.error ?? "Upload failed");
-      }
-
-      setAvailableImages((current) => Array.from(new Set([...current, ...data.images!])));
-      setPlan((current) => ({
-        ...current,
-        slides: [
-          ...current.slides,
-          ...data.images!.map((image) => ({
-            image,
-            caption: image
-              .split("/")
-              .pop()!
-              .replace(/\.[^.]+$/, "")
-              .replace(/[-_]/g, " "),
-            voiceover: "",
-            duration: 90,
-          })),
-        ],
-      }));
-      setStatus(`Uploaded ${data.images.length} image${data.images.length === 1 ? "" : "s"}`);
+      setStatus(`Added ${uploadedImages.length} image${uploadedImages.length === 1 ? "" : "s"}`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Upload failed");
+      setStatus(error instanceof Error ? error.message : "Could not add images");
     } finally {
       setIsBusy(false);
     }
@@ -144,7 +200,7 @@ export default function CreatorDashboard() {
         body: JSON.stringify({
           description,
           plan,
-          images: availableImages,
+          images: plan.slides.map((slide) => slide.image).filter(Boolean),
         }),
       });
       const data = (await response.json()) as { plan?: VideoPlan; usedAi?: boolean; error?: string };
@@ -154,6 +210,7 @@ export default function CreatorDashboard() {
       }
 
       setPlan(normalizeVideoPlan(data.plan));
+      setActiveSceneIndex(0);
       setStatus(data.usedAi ? "Generated with OpenRouter" : "Generated locally");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Generation failed");
@@ -207,10 +264,22 @@ export default function CreatorDashboard() {
           <section className="editor-panel">
             <div className="panel-header">
               <h2>Project</h2>
-              <span>{totalSeconds}s</span>
+              <span>
+                {plan.format.width}x{plan.format.height} · {totalSeconds}s
+              </span>
             </div>
 
             <div className="field-grid">
+              <label className="wide">
+                Format
+                <select value={plan.format.id} onChange={(event) => updateFormat(event.target.value)}>
+                  {videoFormats.map((format) => (
+                    <option value={format.id} key={format.id}>
+                      {format.label} · {format.width}x{format.height}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label>
                 Title
                 <input value={plan.title} onChange={(event) => updatePlan({ title: event.target.value })} />
@@ -236,8 +305,13 @@ export default function CreatorDashboard() {
                 />
               </label>
               <label className="wide">
-                Product Brief
-                <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} />
+                Video Prompt
+                <textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Example: Create a 30-second product video for a budgeting app for freelancers. Tone: confident, clear, modern."
+                  rows={4}
+                />
               </label>
             </div>
 
@@ -247,10 +321,10 @@ export default function CreatorDashboard() {
                 <input type="file" accept="image/*" multiple onChange={onFileChange} />
               </label>
               <button type="button" onClick={uploadImages} disabled={isBusy}>
-                Upload
+                Add Images
               </button>
               <button type="button" onClick={generatePlan} disabled={isBusy}>
-                Generate Script
+                Generate Script From Prompt
               </button>
               <button type="button" className="primary-button" onClick={renderVideo} disabled={isBusy}>
                 Export MP4
@@ -271,24 +345,39 @@ export default function CreatorDashboard() {
             </div>
 
             <div className="scene-list">
+              {plan.slides.length === 0 ? (
+                <div className="empty-state">
+                  Write a prompt and generate a script, or add images to create scenes.
+                </div>
+              ) : null}
               {plan.slides.map((slide, index) => (
-                <article className="scene-row" key={`${slide.image}-${index}`}>
-                  <Image
-                    className="scene-thumb"
-                    src={imageSrc(slide.image)}
-                    alt=""
-                    width={96}
-                    height={132}
-                    unoptimized
-                  />
+                <article
+                  className={`scene-row ${index === activeSceneIndex ? "active-scene" : ""}`}
+                  key={`${slide.image}-${index}`}
+                >
+                  <button
+                    type="button"
+                    className="thumb-button"
+                    onClick={() => {
+                      setActiveSceneIndex(index);
+                      setStatus(`Editing scene ${index + 1}`);
+                    }}
+                  >
+                    {slide.image ? (
+                      <img className="scene-thumb" src={imageSrc(slide.image)} alt="" />
+                    ) : (
+                      <span className="scene-thumb placeholder-thumb">Text</span>
+                    )}
+                  </button>
                   <div className="scene-fields">
                     <div className="inline-fields">
                       <label>
                         Image
                         <select value={slide.image} onChange={(event) => updateSlide(index, { image: event.target.value })}>
-                          {availableImages.map((image) => (
+                          <option value="">Text scene</option>
+                          {availableImages.map((image, imageIndex) => (
                             <option value={image} key={image}>
-                              {image}
+                              {imageLabel(image, imageIndex)}
                             </option>
                           ))}
                         </select>
@@ -338,25 +427,47 @@ export default function CreatorDashboard() {
           </section>
 
           <aside className="preview-panel">
-            <div className="phone-preview" style={{ backgroundColor: plan.colors.background }}>
-              {activeSlide ? (
-                <>
-                  <Image className="preview-bg" src={imageSrc(activeSlide.image)} alt="" fill unoptimized />
-                  <div className="preview-top">
-                    <span>{plan.title}</span>
-                    <span style={{ color: plan.colors.accent }}>{plan.slides.length} scenes</span>
-                  </div>
-                  <div className="preview-shot" style={{ borderColor: plan.colors.accent }}>
-                    <Image className="preview-image" src={imageSrc(activeSlide.image)} alt="" fill unoptimized />
-                  </div>
-                  <div className="preview-caption" style={{ backgroundColor: plan.colors.accent }}>
-                    {activeSlide.caption}
-                  </div>
-                </>
-              ) : null}
+            <div
+              className="player-wrap"
+              style={{
+                aspectRatio: `${plan.format.width} / ${plan.format.height}`,
+              }}
+            >
+              <Player
+                component={ImageVideoComposition}
+                inputProps={{ plan }}
+                durationInFrames={getVideoPlanDuration(plan)}
+                fps={30}
+                compositionWidth={plan.format.width}
+                compositionHeight={plan.format.height}
+                controls
+                loop
+                className="remotion-player"
+              />
             </div>
 
             <div className="script-panel">
+              <div className="panel-header">
+                <h2>Current Scene</h2>
+                <span>
+                  {plan.slides.length === 0 ? "0/0" : `${activeSceneIndex + 1}/${plan.slides.length}`}
+                </span>
+              </div>
+              {activeSlide ? (
+                <div className="current-scene">
+                  {activeSlide.image ? (
+                    <img src={imageSrc(activeSlide.image)} alt="" />
+                  ) : (
+                    <div className="current-placeholder">Text</div>
+                  )}
+                  <div>
+                    <strong>{activeSlide.caption}</strong>
+                    <p>{activeSlide.voiceover || "No voiceover yet."}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state">No scenes yet.</div>
+              )}
               <h2>Script</h2>
               <p className="hook-line">{plan.hook}</p>
               <ol>
@@ -364,7 +475,9 @@ export default function CreatorDashboard() {
                   <li key={`${slide.caption}-${index}`}>{slide.voiceover || slide.caption}</li>
                 ))}
               </ol>
-              <p className="cta-line">{plan.cta}</p>
+              <a className="cta-link" href={ctaHref(plan.url)} target="_blank" rel="noreferrer">
+                {plan.cta}
+              </a>
             </div>
           </aside>
         </div>

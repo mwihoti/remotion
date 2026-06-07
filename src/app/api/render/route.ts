@@ -14,6 +14,17 @@ interface RenderRequest {
 }
 
 export async function POST(request: Request) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      {
+        error: "Hosted MP4 export is not configured",
+        detail:
+          "This Vercel deployment can preview and create scripts, but server-side Remotion MP4 rendering needs a persistent renderer such as Remotion Lambda, a worker server, or local `npm run render:image`.",
+      },
+      { status: 501 },
+    );
+  }
+
   const body = (await request.json()) as RenderRequest;
   const plan = normalizeVideoPlan(body.plan ?? {});
   const id = `${Date.now()}`;

@@ -7,6 +7,7 @@
   "private": true,
   "dependencies": {
     "@remotion/cli": "4.0.445",
+    "@remotion/player": "^4.0.445",
     "@remotion/tailwind-v4": "4.0.445",
     "next": "^16.2.7",
     "react": "19.2.3",

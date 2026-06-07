@@ -53,7 +53,9 @@ const schema = {
 };
 
 const inferCaption = (image: string) =>
-  image
+  image.startsWith("data:")
+    ? "Uploaded Image"
+    : image
     .split("/")
     .pop()!
     .replace(/\.[^.]+$/, "")
@@ -61,20 +63,82 @@ const inferCaption = (image: string) =>
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const promptScenes = (description: string, current: VideoPlan) => {
+  const topic = description.trim() || "your idea";
+
+  return [
+    {
+      image: "",
+      caption: "Hook",
+      voiceover: `Open with the clearest reason people should care about ${topic}.`,
+      duration: 90,
+      position: "center" as const,
+    },
+    {
+      image: "",
+      caption: "The problem",
+      voiceover: `Show the pain point or missed opportunity behind ${topic}.`,
+      duration: 90,
+      position: "center" as const,
+    },
+    {
+      image: "",
+      caption: "The solution",
+      voiceover: `Explain how ${current.title === "Untitled Video" ? "this idea" : current.title} solves it in simple words.`,
+      duration: 90,
+      position: "center" as const,
+    },
+    {
+      image: "",
+      caption: "Why it works",
+      voiceover: "Add one proof point, benefit, or concrete detail that makes the claim believable.",
+      duration: 90,
+      position: "center" as const,
+    },
+    {
+      image: "",
+      caption: current.cta || "Take action",
+      voiceover: "Close with one direct next step for the viewer.",
+      duration: 90,
+      position: "center" as const,
+    },
+  ];
+};
+
 const fallbackPlan = (body: GeneratePlanRequest) => {
   const current = normalizeVideoPlan(body.plan ?? defaultVideoPlan);
-  const images = body.images?.length ? body.images : current.slides.map((slide) => slide.image);
+  const images = body.images?.length
+    ? body.images
+    : current.slides.map((slide) => slide.image).filter(Boolean);
+  const currentSlideByImage = new Map(current.slides.map((slide) => [slide.image, slide]));
+
+  if (images.length === 0) {
+    return normalizeVideoPlan({
+      ...current,
+      title: current.title === "Untitled Video" && body.description ? "Prompt Video" : current.title,
+      subtitle: body.description || current.subtitle,
+      hook: body.description ? `Make people care about: ${body.description}` : current.hook,
+      slides: promptScenes(body.description ?? "", current),
+    });
+  }
 
   return normalizeVideoPlan({
     ...current,
     hook: body.description ? `Turn this into a habit people can see: ${current.title}` : current.hook,
-    slides: images.map((image, index) => ({
-      image,
-      caption: index === 0 ? current.cta : inferCaption(image),
-      voiceover: `${inferCaption(image)} helps the viewer understand the product in seconds.`,
-      duration: 90,
-      position: "center",
-    })),
+    slides: images.map((image, index) => {
+      const existing = currentSlideByImage.get(image);
+      const caption = existing?.caption || (index === 0 ? current.cta : inferCaption(image));
+
+      return {
+        image,
+        caption,
+        voiceover:
+          existing?.voiceover ||
+          `${caption} shows why ${current.title} matters and what the viewer should do next.`,
+        duration: existing?.duration ?? 90,
+        position: existing?.position ?? "center",
+      };
+    }),
   });
 };
 
@@ -86,6 +150,10 @@ const mimeForImage = (image: string) => {
 };
 
 const readImageAsDataUrl = async (image: string) => {
+  if (image.startsWith("data:") || image.startsWith("http://") || image.startsWith("https://")) {
+    return image;
+  }
+
   const fullPath = path.join(process.cwd(), "public", image);
   const data = await readFile(fullPath);
   return `data:${mimeForImage(image)};base64,${data.toString("base64")}`;
@@ -113,7 +181,9 @@ export async function POST(request: Request) {
   }
 
   const current = normalizeVideoPlan(body.plan ?? defaultVideoPlan);
-  const images = body.images?.length ? body.images : current.slides.map((slide) => slide.image);
+  const images = body.images?.length
+    ? body.images
+    : current.slides.map((slide) => slide.image).filter(Boolean);
   const imageParts = await Promise.all(
     images.slice(0, 10).map(async (image) => ({
       type: "image_url",
@@ -177,5 +247,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OpenRouter returned no content" }, { status: 502 });
   }
 
-  return NextResponse.json({ plan: normalizeVideoPlan(parseModelJson(content)), usedAi: true });
+  const generatedPlan = parseModelJson(content);
+
+  return NextResponse.json({
+    plan: normalizeVideoPlan({
+      ...generatedPlan,
+      format: generatedPlan.format ?? current.format,
+    }),
+    usedAi: true,
+  });
 }

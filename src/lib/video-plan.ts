@@ -6,12 +6,22 @@ export interface VideoPlanSlide {
   position?: "center" | "top" | "bottom";
 }
 
+export type VideoFormatId = "portrait" | "landscape" | "square" | "wide";
+
+export interface VideoFormat {
+  id: VideoFormatId;
+  label: string;
+  width: number;
+  height: number;
+}
+
 export interface VideoPlan {
   title: string;
   subtitle: string;
   hook: string;
   cta: string;
   url: string;
+  format: VideoFormat;
   colors: {
     background: string;
     surface: string;
@@ -22,12 +32,23 @@ export interface VideoPlan {
   slides: VideoPlanSlide[];
 }
 
+export const videoFormats: VideoFormat[] = [
+  { id: "portrait", label: "Portrait 9:16", width: 720, height: 1280 },
+  { id: "landscape", label: "Landscape 16:9", width: 1280, height: 720 },
+  { id: "square", label: "Square 1:1", width: 1080, height: 1080 },
+  { id: "wide", label: "Wide 21:9", width: 1920, height: 820 },
+];
+
+export const getVideoFormat = (id?: string) =>
+  videoFormats.find((format) => format.id === id) ?? videoFormats[0];
+
 export const defaultVideoPlan: VideoPlan = {
-  title: "Daily Habit Hub",
-  subtitle: "Build habits. Earn rewards. Own the proof.",
-  hook: "What if your gym streak made you money?",
-  cta: "Start your streak",
-  url: "daily-habit-hub.vercel.app",
+  title: "Untitled Video",
+  subtitle: "Use a prompt or images to create your video.",
+  hook: "Write a prompt to generate a script.",
+  cta: "Create video",
+  url: "",
+  format: getVideoFormat("portrait"),
   colors: {
     background: "#05070a",
     surface: "#101820",
@@ -35,49 +56,13 @@ export const defaultVideoPlan: VideoPlan = {
     orange: "#FF6B2B",
     text: "#FFFFFF",
   },
-  slides: [
-    {
-      image: "app_home.png",
-      caption: "Start your streak",
-      voiceover: "Open the app and begin a habit streak that compounds every day.",
-      duration: 90,
-    },
-    {
-      image: "app_checkin.png",
-      caption: "Check in daily",
-      voiceover: "Log each workout with one tap and keep your momentum visible.",
-      duration: 90,
-    },
-    {
-      image: "app_progress.png",
-      caption: "Track every milestone",
-      voiceover: "See progress, streaks, and consistency patterns at a glance.",
-      duration: 90,
-    },
-    {
-      image: "app_achievements.png",
-      caption: "Unlock achievement NFTs",
-      voiceover: "Earn permanent badges for the habits you actually build.",
-      duration: 90,
-    },
-    {
-      image: "app_community.png",
-      caption: "Climb with your community",
-      voiceover: "Stay accountable with a community that moves with you.",
-      duration: 90,
-    },
-    {
-      image: "app_badge.png",
-      caption: "Own the proof forever",
-      voiceover: "Your consistency becomes proof you can keep.",
-      duration: 90,
-    },
-  ],
+  slides: [],
 };
 
 export const normalizeVideoPlan = (plan: Partial<VideoPlan>): VideoPlan => ({
   ...defaultVideoPlan,
   ...plan,
+  format: getVideoFormat(plan.format?.id ?? plan.format?.label ?? defaultVideoPlan.format.id),
   colors: {
     ...defaultVideoPlan.colors,
     ...plan.colors,
@@ -87,7 +72,7 @@ export const normalizeVideoPlan = (plan: Partial<VideoPlan>): VideoPlan => ({
       ...slide,
       duration: Math.max(60, slide.duration ?? 90),
       caption: slide.caption || "Untitled scene",
-      image: slide.image || defaultVideoPlan.slides[0].image,
+      image: slide.image ?? "",
     })) ?? defaultVideoPlan.slides,
 });
 
