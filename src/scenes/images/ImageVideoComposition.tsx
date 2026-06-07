@@ -8,42 +8,44 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { ImageVideoConfig, ImageVideoSlide } from "./ImageVideoConfig";
+import { VideoPlan, VideoPlanSlide, getVideoPlanDuration, normalizeVideoPlan } from "../../lib/video-plan";
+import { ImageVideoConfig } from "./ImageVideoConfig";
 
-export const getImageVideoDuration = () =>
-  ImageVideoConfig.slides.reduce((total, slide) => total + slide.duration, 0) + 120;
+export const getImageVideoDuration = (plan = ImageVideoConfig) => getVideoPlanDuration(plan);
 
-export const ImageVideoComposition: React.FC = () => {
+export const ImageVideoComposition: React.FC<{ plan?: Partial<VideoPlan> }> = ({ plan }) => {
+  const activePlan = normalizeVideoPlan(plan ?? ImageVideoConfig);
   let startFrame = 0;
 
   return (
-    <AbsoluteFill style={{ backgroundColor: ImageVideoConfig.colors.background }}>
-      {ImageVideoConfig.slides.map((slide, index) => {
+    <AbsoluteFill style={{ backgroundColor: activePlan.colors.background }}>
+      {activePlan.slides.map((slide, index) => {
         const from = startFrame;
         startFrame += slide.duration;
 
         return (
           <Sequence key={`${slide.image}-${index}`} from={from} durationInFrames={slide.duration}>
-            <ImageSlide slide={slide} index={index} total={ImageVideoConfig.slides.length} />
+            <ImageSlide slide={slide} index={index} total={activePlan.slides.length} plan={activePlan} />
           </Sequence>
         );
       })}
 
       <Sequence from={startFrame} durationInFrames={120}>
-        <FinalSlide />
+        <FinalSlide plan={activePlan} />
       </Sequence>
     </AbsoluteFill>
   );
 };
 
-const ImageSlide: React.FC<{ slide: ImageVideoSlide; index: number; total: number }> = ({
+const ImageSlide: React.FC<{ slide: VideoPlanSlide; index: number; total: number; plan: VideoPlan }> = ({
   slide,
   index,
   total,
+  plan,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const accent = index % 2 === 0 ? ImageVideoConfig.colors.accent : ImageVideoConfig.colors.orange;
+  const accent = index % 2 === 0 ? plan.colors.accent : plan.colors.orange;
 
   const imageScale = interpolate(frame, [0, slide.duration], [1.04, 1.14], {
     extrapolateLeft: "clamp",
@@ -113,7 +115,7 @@ const ImageSlide: React.FC<{ slide: ImageVideoSlide; index: number; total: numbe
           overflow: "hidden",
           border: `8px solid ${accent}`,
           boxShadow: `0 0 48px ${accent}55`,
-          backgroundColor: ImageVideoConfig.colors.surface,
+          backgroundColor: plan.colors.surface,
           opacity: imageOpacity,
           transform: `scale(${interpolate(frame, [0, 25], [0.92, 1], {
             extrapolateLeft: "clamp",
@@ -141,11 +143,11 @@ const ImageSlide: React.FC<{ slide: ImageVideoSlide; index: number; total: numbe
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          color: ImageVideoConfig.colors.text,
+          color: plan.colors.text,
           opacity: captionOpacity,
         }}
       >
-        <div style={{ fontSize: 24, fontWeight: 800 }}>{ImageVideoConfig.title}</div>
+        <div style={{ fontSize: 24, fontWeight: 800 }}>{plan.title}</div>
         <div style={{ fontSize: 18, fontWeight: 700, color: accent }}>
           {index + 1}/{total}
         </div>
@@ -168,7 +170,7 @@ const ImageSlide: React.FC<{ slide: ImageVideoSlide; index: number; total: numbe
             padding: "16px 28px",
             borderRadius: 999,
             backgroundColor: accent,
-            color: ImageVideoConfig.colors.background,
+            color: plan.colors.background,
             fontSize: 42,
             fontWeight: 900,
             lineHeight: 1.05,
@@ -183,7 +185,7 @@ const ImageSlide: React.FC<{ slide: ImageVideoSlide; index: number; total: numbe
   );
 };
 
-const FinalSlide: React.FC = () => {
+const FinalSlide: React.FC<{ plan: VideoPlan }> = ({ plan }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const scale = spring({ frame, fps, config: { damping: 13, stiffness: 90 } });
@@ -197,8 +199,8 @@ const FinalSlide: React.FC = () => {
       style={{
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: ImageVideoConfig.colors.background,
-        color: ImageVideoConfig.colors.text,
+        backgroundColor: plan.colors.background,
+        color: plan.colors.text,
         fontFamily: "'Inter', 'Segoe UI', sans-serif",
         padding: 56,
         textAlign: "center",
@@ -210,7 +212,7 @@ const FinalSlide: React.FC = () => {
           width: 620,
           height: 620,
           borderRadius: "50%",
-          backgroundColor: ImageVideoConfig.colors.accent,
+          backgroundColor: plan.colors.accent,
           opacity: 0.16,
           filter: "blur(120px)",
         }}
@@ -219,29 +221,29 @@ const FinalSlide: React.FC = () => {
       <div style={{ opacity, transform: `scale(${scale})` }}>
         <div
           style={{
-            color: ImageVideoConfig.colors.accent,
+            color: plan.colors.accent,
             fontSize: 64,
             fontWeight: 950,
             marginBottom: 20,
             lineHeight: 1,
           }}
         >
-          {ImageVideoConfig.title}
+          {plan.title}
         </div>
         <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.2, marginBottom: 42 }}>
-          {ImageVideoConfig.subtitle}
+          {plan.subtitle}
         </div>
         <div
           style={{
             display: "inline-block",
-            borderBottom: `4px solid ${ImageVideoConfig.colors.orange}`,
-            color: ImageVideoConfig.colors.orange,
+            borderBottom: `4px solid ${plan.colors.orange}`,
+            color: plan.colors.orange,
             fontSize: 30,
             fontWeight: 900,
             paddingBottom: 8,
           }}
         >
-          {ImageVideoConfig.url}
+          {plan.url}
         </div>
       </div>
     </AbsoluteFill>

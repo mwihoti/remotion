@@ -5,6 +5,7 @@ import { fitTribeConfig } from "./configs/fittribe";
 import { TikTokComposition } from "./scenes/tiktok/TikTokComposition";
 import { TikTokConfig } from "./scenes/tiktok/TikTokConfig";
 import { ImageVideoComposition, getImageVideoDuration } from "./scenes/images/ImageVideoComposition";
+import { normalizeVideoPlan } from "./lib/video-plan";
 
 // To make a video for a different app, swap the config here.
 const activeConfig = fitTribeConfig;
@@ -36,9 +37,13 @@ export const RemotionRoot: React.FC = () => {
         id="ImageVideo"
         component={ImageVideoComposition}
         durationInFrames={getImageVideoDuration()}
+        calculateMetadata={({ props }) => ({
+          durationInFrames: getImageVideoDuration(normalizeVideoPlan(props.plan ?? {})),
+        })}
         fps={30}
         width={720}
         height={1280}
+        defaultProps={{ plan: undefined }}
       />
     </>
   );

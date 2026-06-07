@@ -25,6 +25,12 @@ npm i
 npm run dev
 ```
 
+**Start Remotion Studio**
+
+```console
+npm run studio
+```
+
 **Render video**
 
 ```console
@@ -37,7 +43,7 @@ npx remotion render
 npx remotion render ImageVideo out/image-video.mp4
 ```
 
-To change the images, add files to `public/` and edit `src/scenes/images/ImageVideoConfig.ts`.
+To change the default images, add files to `public/` and edit `src/scenes/images/ImageVideoConfig.ts`.
 
 **Upgrade Remotion**
 
