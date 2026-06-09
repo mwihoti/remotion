@@ -57,6 +57,33 @@ const schema = {
 const systemPrompt =
   "You are a concise short-form video strategist. Return only JSON matching the schema. Use the provided image filenames exactly. Create punchy captions, a strong hook, a clear CTA, practical voiceover lines, and keep the selected format unchanged.";
 
+const envValue = (name: string) => process.env[name]?.trim();
+
+const getOpenRouterApiKey = () => {
+  const apiKey = envValue("OPENROUTER_API_KEY");
+
+  if (!apiKey) {
+    return undefined;
+  }
+
+  if (!apiKey.startsWith("sk-or-")) {
+    throw new Error("OPENROUTER_API_KEY is set but does not look like an OpenRouter secret key. It should start with sk-or-.");
+  }
+
+  return apiKey;
+};
+
+const envNumber = (name: string, fallback: number) => {
+  const value = envValue(name);
+  const parsed = value ? Number(value) : Number.NaN;
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const jsonHeaders = {
+  "Content-Type": "application/json",
+};
+
 const inferCaption = (image: string) =>
   image.startsWith("data:")
     ? "Uploaded Image"
@@ -209,14 +236,16 @@ const generateWithOllama = async ({
   current: VideoPlan;
   images: string[];
 }) => {
-  const baseUrl = (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-  const model = process.env.OLLAMA_MODEL ?? "kimi-k2.5";
+  const baseUrl = (envValue("OLLAMA_BASE_URL") ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+  const model = envValue("OLLAMA_MODEL") ?? "kimi-k2.5";
+  const apiKey = envValue("OLLAMA_API_KEY");
   const imageDataUrls = await Promise.all(images.slice(0, 10).map(readImageAsDataUrl));
 
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      ...jsonHeaders,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify({
       model,
@@ -274,13 +303,19 @@ const generateWithOpenRouter = async ({
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
+      ...jsonHeaders,
       Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+      "HTTP-Referer": envValue("NEXT_PUBLIC_APP_URL") ?? "http://localhost:3000",
       "X-Title": "Image Video Studio",
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL ?? "moonshotai/kimi-k2.5",
+      model: envValue("OPENROUTER_MODEL") ?? "moonshotai/kimi-k2.5",
+      max_tokens: envNumber("OPENROUTER_MAX_TOKENS", 900),
+      reasoning: {
+        max_tokens: envNumber("OPENROUTER_REASONING_MAX_TOKENS", 128),
+        exclude: true,
+      },
+      temperature: 0.4,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -313,11 +348,28 @@ const generateWithOpenRouter = async ({
     throw new Error(`OpenRouter request failed: ${detail}`);
   }
 
-  const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content;
+  const data = (await response.json()) as {
+    choices?: {
+      finish_reason?: string;
+      message?: {
+        content?: string;
+        reasoning?: string;
+      };
+    }[];
+    usage?: {
+      completion_tokens?: number;
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
+      };
+    };
+  };
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content;
 
   if (!content) {
-    throw new Error("OpenRouter returned no content");
+    throw new Error(
+      `OpenRouter returned no content. finish_reason=${choice?.finish_reason ?? "unknown"}, completion_tokens=${data.usage?.completion_tokens ?? "unknown"}, reasoning_tokens=${data.usage?.completion_tokens_details?.reasoning_tokens ?? "unknown"}, reasoning_length=${choice?.message?.reasoning?.length ?? 0}`,
+    );
   }
 
   return parseModelJson(content);
@@ -334,15 +386,17 @@ export async function POST(request: Request) {
   let provider: AiProvider = "local";
 
   try {
-    if (process.env.AI_PROVIDER === "ollama" || process.env.OLLAMA_MODEL || process.env.OLLAMA_BASE_URL) {
+    const openRouterApiKey = getOpenRouterApiKey();
+
+    if (envValue("AI_PROVIDER") === "ollama" || envValue("OLLAMA_MODEL") || envValue("OLLAMA_BASE_URL")) {
       generatedPlan = await generateWithOllama({ body, current, images });
       provider = "ollama";
-    } else if (process.env.OPENROUTER_API_KEY) {
+    } else if (openRouterApiKey) {
       generatedPlan = await generateWithOpenRouter({
         body,
         current,
         images,
-        apiKey: process.env.OPENROUTER_API_KEY,
+        apiKey: openRouterApiKey,
       });
       provider = "openrouter";
     } else {
